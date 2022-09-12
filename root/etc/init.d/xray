@@ -309,12 +309,46 @@ gen_server_trojan_config() {
 	}
 }
 
+gen_server_shadowsocks_config() {
+	validate_server $1 && {
+		cat <<-EOF
+			    {
+			      "protocol": "$(uci_get_by_name $1 protocol)",
+			      "settings": {$(get_plugin_config $1)
+			        "servers": [
+			          {
+			            "address": "$(uci_get_by_name $1 server)",
+			            "port": $(uci_get_by_name $1 server_port),
+			            "password": "$(uci_get_by_name $1 id)",
+			            "method": "$(uci_get_by_name $1 security)"
+			          }
+			        ]
+			      }
+			    },
+		EOF
+	}
+}
+
+get_plugin_config() {
+	local plugin=$(which $(uci_get_by_name $1 plugin))
+	local plugin_opts=$(uci_get_by_name $1 plugin_opts)
+	if [ -n "$plugin" ]; then
+		echo $plugin >>/var/run/xray-plugin
+		echo -e "\n        \"plugin\": \"$plugin\","
+		if [ -n "$plugin_opts" ]; then
+			echo "        \"pluginOpts\": \"$plugin_opts\","
+		fi
+	fi
+}
+
 gen_server_config() {
 	local protocol=$(uci_get_by_name $1 protocol)
 	if [ "V${protocol}" = "Vvless" ]; then
 		gen_server_vless_config $1
 	elif [ "V${protocol}" = "Vtrojan" ]; then
 		gen_server_trojan_config $1
+	elif [ "V${protocol}" = "Vshadowsocks" ]; then
+		gen_server_shadowsocks_config $1
 	else
 		echo "# Err: protocol[$protocol] not supported!"
 		exit 1
@@ -383,6 +417,10 @@ kill_all() {
 stop() {
 	/usr/bin/${NAME}-rules -f
 	kill_all /usr/bin/${NAME}
+	if [ -f /var/run/xray-plugin ]; then
+		kill_all $(sort -u /var/run/xray-plugin)
+		rm -f /var/run/xray-plugin
+	fi
 	xray_cleandns
 	del_cron
 }
