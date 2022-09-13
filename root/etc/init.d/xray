@@ -41,6 +41,11 @@ uci_bool_by_type() {
 	return 1
 }
 
+dd_random() {
+	len=${1:-10}
+	dd if=/dev/urandom bs=1 count=${len} 2>/dev/null | sha256sum | head -c${len}
+}
+
 validate_server() {
 	[ "$(uci get $NAME.$1 2>/dev/null)" = "servers" ]
 }
@@ -245,6 +250,7 @@ gen_server_vless_config() {
 		[ "V$serverName" = "V" ] && serverName=$(uci_get_by_name $1 server)
 		cat <<-EOF
 			    {
+			      "tag": "dummy-$(dd_random)",
 			      "protocol": "$(uci_get_by_name $1 protocol)",
 			      "settings": {
 			        "vnext": [
@@ -286,6 +292,7 @@ gen_server_trojan_config() {
 		[ "V$serverName" = "V" ] && serverName=$(uci_get_by_name $1 server)
 		cat <<-EOF
 			    {
+			      "tag": "dummy-$(dd_random)",
 			      "protocol": "$(uci_get_by_name $1 protocol)",
 			      "settings": {
 			        "servers": [
@@ -313,6 +320,7 @@ gen_server_shadowsocks_config() {
 	validate_server $1 && {
 		cat <<-EOF
 			    {
+			      "tag": "dummy-$(dd_random)",
 			      "protocol": "$(uci_get_by_name $1 protocol)",
 			      "settings": {$(get_plugin_config $1)
 			        "servers": [
@@ -365,10 +373,31 @@ gen_config_outbounds() {
 
 gen_config_file() {
 	local config_file=/var/etc/$NAME.json
+	local balancer_name="balancer-$(dd_random)"
 	cat <<-EOF >$config_file
 		{
 			$(gen_config_inbounds)
 			$(gen_config_outbounds)
+		  "routing": {
+		    "domainStrategy": "AsIs",
+		    "domainMatcher": "mph",
+		    "rules": [{
+		      "type": "field",
+		      "network": "tcp,udp",
+		      "balancerTag": "${balancer_name}"
+		    }],
+		    "balancers": [{
+		      "tag": "${balancer_name}",
+		      "selector": ["dummy"],
+		      "strategy": {
+		      "type": "$(uci_get_by_type general strategy leastPing)"
+		      }
+		    }]
+		  },
+		  "observatory": {
+		    "subjectSelector": [ "outbound" ],
+		    "probeURL": "http://${WATCHDOG_ENDPOINT}/generate_204"
+		  },
 		  "log": {
 		    "loglevel": "warning"
 		  }
